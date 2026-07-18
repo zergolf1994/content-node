@@ -1,0 +1,33 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+build.bat
+.build
+
+# Temp / download
+/conf/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+
+# Node
+node_modules/
+
+install.txt
+# ไฟล์คำสั่งติดตั้งส่วนตัว (มี connection string จริง)
+install.txt
