@@ -58,13 +58,6 @@ type DomainAdverts struct {
 	Script DomainAdvertCategory `bson:"script" json:"script"`
 }
 
-// DomainAds holds legacy advertisement configuration (Ad document ID lists).
-type DomainAds struct {
-	Video  []string `bson:"video" json:"video"`
-	Image  []string `bson:"image" json:"image"`
-	Script []string `bson:"script" json:"script"`
-}
-
 // DomainDNS holds DNS configuration for domain verification.
 type DomainDNS struct {
 	RecordType        string     `bson:"recordType" json:"recordType"`
@@ -89,7 +82,6 @@ type CustomDomain struct {
 	DNS       *DomainDNS     `bson:"dns,omitempty" json:"dns,omitempty"`
 	Player    *PlayerConfig  `bson:"player,omitempty" json:"player,omitempty"`
 	Adverts   *DomainAdverts `bson:"adverts,omitempty" json:"adverts,omitempty"`
-	Ads       *DomainAds     `bson:"ads,omitempty" json:"ads,omitempty"`
 	CreatedAt time.Time      `bson:"createdAt" json:"createdAt" goose:"default:now"`
 	UpdatedAt time.Time      `bson:"updatedAt" json:"updatedAt" goose:"default:now"`
 }

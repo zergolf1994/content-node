@@ -39,15 +39,6 @@ func spacesFilePath() string {
 	return filepath.Join(exe, "conf", "spaces.json")
 }
 
-// adsFilePath returns the path to conf/ads.json
-func adsFilePath() string {
-	exe, err := executableDir()
-	if err != nil {
-		return filepath.Join("conf", "ads.json")
-	}
-	return filepath.Join(exe, "conf", "ads.json")
-}
-
 // ─── Domain Cache ─────────────────────────────────────────────────────
 
 var (

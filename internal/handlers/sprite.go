@@ -199,10 +199,11 @@ func (h *Handler) HandleSpriteImage(w http.ResponseWriter, r *http.Request) {
 }
 
 func isValidSpriteFilename(filename string) bool {
-	if !strings.HasSuffix(filename, ".jpg") {
+	// server-spritesheet สร้างไฟล์ชื่อ sprite-{n}.jpg (อ้างใน sprite.vtt)
+	if !strings.HasPrefix(filename, "sprite-") || !strings.HasSuffix(filename, ".jpg") {
 		return false
 	}
-	name := strings.TrimSuffix(filename, ".jpg")
+	name := strings.TrimSuffix(strings.TrimPrefix(filename, "sprite-"), ".jpg")
 	if name == "" {
 		return false
 	}

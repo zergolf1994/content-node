@@ -139,8 +139,9 @@ func Init(logPath string) (io.Closer, error) {
 	// Set global writer so ProcessLogger can use it for MultiWriter
 	GlobalWriter = rw
 
-	// Write to file only (no stdout)
-	log.SetOutput(rw)
+	// เขียนทั้ง stdout (journalctl เห็น) และไฟล์ — ตอนรันใต้ systemd
+	// ถ้าเขียนไฟล์อย่างเดียว error ตอน crash จะหายไปจาก journal
+	log.SetOutput(io.MultiWriter(os.Stdout, rw))
 	log.SetFlags(log.LstdFlags)
 
 	return rw, nil

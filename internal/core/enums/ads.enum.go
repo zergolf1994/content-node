@@ -1,19 +1,9 @@
 package enums
 
-// ─── Ads Type / Status ───────────────────────────────────────────────
-// ค่าตรงกับที่ใช้ใน collection "ads" (admin ฝั่ง vdohide เป็นคนเขียน)
-
-const (
-	AdsTypeVideo  = "video"
-	AdsTypeImage  = "image"
-	AdsTypeScript = "script"
-
-	AdsStatusActive = "active"
-)
-
 // ─── Setting Keys ────────────────────────────────────────────────────
 
 const (
-	// advert_hobby = {vdo, image, javascript} — รายการ Ad IDs สำหรับ hobby plan
+	// advert_hobby = {video, image, script} — adverts ฝังเต็มก้อน
+	// (รูปเดียวกับ custom_domains.adverts, admin ฝั่ง vdohide เป็นคนเขียน)
 	SettingAdvertHobby = "advert_hobby"
 )
