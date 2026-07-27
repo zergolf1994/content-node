@@ -32,6 +32,23 @@ print_status()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# ชื่อตัวแปร nginx ห้ามมี "-" — content-node → content_node
+CONN_VAR="${APP_NAME//-/_}_conn"
+
+# map เลือกค่า header Connection ตามคำขอแต่ละอัน
+#
+# keepalive ไปยัง upstream จะทำงานก็ต่อเมื่อ Connection เป็นค่าว่าง แต่
+# WebSocket ต้องการ "upgrade" — ของเดิม hardcode 'upgrade' ไว้ตายตัว
+# keepalive 32 ที่ตั้งไว้จึงไม่เคยถูกใช้เลย เปิด TCP ใหม่ทุก request
+nginx_conn_map() {
+    cat <<MAP
+map \$http_upgrade \$${CONN_VAR} {
+    default upgrade;
+    ''      '';
+}
+MAP
+}
+
 # Parse args
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -101,8 +118,18 @@ if [ "$UNINSTALL" = true ]; then
     systemctl daemon-reload
     [ -d "$APP_DIR" ] && rm -rf "$APP_DIR"
     # nginx vhost ของ app นี้ (ถ้ามี)
+    NGINX_TOUCHED=false
     if [ -f "/etc/nginx/sites-available/$APP_NAME" ]; then
         rm -f "/etc/nginx/sites-available/$APP_NAME" "/etc/nginx/sites-enabled/$APP_NAME"
+        NGINX_TOUCHED=true
+    fi
+    # catch-all เก่าที่เคยเขียนทับ default ไว้ — ลบเฉพาะไฟล์ที่เป็นของเรา
+    if [ -f /etc/nginx/sites-available/default ] &&
+        head -1 /etc/nginx/sites-available/default | grep -q "^# $APP_NAME: catch-all"; then
+        rm -f /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+        NGINX_TOUCHED=true
+    fi
+    if [ "$NGINX_TOUCHED" = true ]; then
         command -v nginx &>/dev/null && nginx -t 2>/dev/null && systemctl reload nginx || true
     fi
     print_status "✅ Uninstalled successfully!"
@@ -204,17 +231,44 @@ if [ "$INSTALL_NGINX" = true ]; then
 
     if [ "${#DOMAINS[@]}" -eq 0 ]; then
         # ── Catch-all: รับทุกโดเมน ────────────────────────────
+        #
+        # เขียนลงไฟล์ของตัวเอง ไม่แตะ sites-available/default เพราะไฟล์นั้น
+        # อาจเป็นของ app อื่นบนเครื่องเดียวกัน (เช่น player-node) — ของเดิม
+        # เขียนทับทำให้ vhost ของเขาหายเงียบๆ
+        #
+        # ถ้ามี vhost อื่นจอง default_server อยู่แล้ว เราจะไม่ประกาศซ้ำ
+        # (nginx จะ error "duplicate default server" แล้ว reload ไม่ผ่านทั้งเครื่อง)
+        DEFAULT_OWNER=""
+        if [ -d /etc/nginx/sites-enabled ]; then
+            DEFAULT_OWNER=$(grep -rls "default_server" /etc/nginx/sites-enabled/ 2>/dev/null \
+                | grep -v "/${APP_NAME}$" | head -1)
+        fi
+
+        LISTEN_80="listen 80 default_server;"
+        LISTEN_V6="listen [::]:80 default_server;"
+        if [ -n "$DEFAULT_OWNER" ]; then
+            print_warning "มี vhost อื่นจอง default_server อยู่แล้ว: $DEFAULT_OWNER"
+            print_warning "จะไม่ประกาศ default_server ซ้ำ — โดเมนที่ไม่ตรง vhost ไหนจะไปที่ตัวนั้นแทน"
+            print_warning "ถ้าต้องการให้ $APP_NAME รับทุกโดเมน ให้ระบุ --domain หรือย้าย vhost นั้นออก"
+            LISTEN_80="listen 80;"
+            LISTEN_V6="listen [::]:80;"
+        fi
+
         print_status "No --domain → catch-all (accept ALL domains) → $APP_HOST:$PORT"
-        cat > /etc/nginx/sites-available/default <<EOF
+        cat > /etc/nginx/sites-available/$APP_NAME <<EOF
 # $APP_NAME: catch-all — accepts every domain
+$(nginx_conn_map)
+
 upstream $APP_NAME {
     server $APP_HOST:$PORT;
-    keepalive 32;
+    keepalive          32;
+    keepalive_timeout  60s;
+    keepalive_requests 1000;
 }
 
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
+    $LISTEN_80
+    $LISTEN_V6
     server_name _;
 
     proxy_buffering         off;
@@ -224,7 +278,7 @@ server {
         proxy_pass         http://$APP_NAME;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade           \$http_upgrade;
-        proxy_set_header   Connection        'upgrade';
+        proxy_set_header   Connection        \$${CONN_VAR};
         proxy_set_header   Host              \$host;
         proxy_set_header   X-Real-IP         \$remote_addr;
         proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
@@ -234,15 +288,27 @@ server {
     }
 }
 EOF
-        ln -sf /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+        ln -sf /etc/nginx/sites-available/$APP_NAME /etc/nginx/sites-enabled/$APP_NAME
+
+        # เวอร์ชันก่อนหน้าเขียน catch-all ทับ sites-available/default ไว้
+        # — ถ้าเจอไฟล์ที่เป็นของเรา (มี marker) ให้เก็บกวาดทิ้ง ไฟล์ของคนอื่นไม่แตะ
+        if [ -f /etc/nginx/sites-available/default ] &&
+            head -1 /etc/nginx/sites-available/default | grep -q "^# $APP_NAME: catch-all"; then
+            print_warning "พบ catch-all เก่าของ $APP_NAME ใน sites-available/default — ลบทิ้ง"
+            rm -f /etc/nginx/sites-available/default /etc/nginx/sites-enabled/default
+        fi
     else
         # ── โดเมนเฉพาะ ────────────────────────────────────────
         SERVER_NAMES="${DOMAINS[*]}"
         print_status "Domains: $SERVER_NAMES → $APP_HOST:$PORT"
         cat > /etc/nginx/sites-available/$APP_NAME <<EOF
+$(nginx_conn_map)
+
 upstream $APP_NAME {
     server $APP_HOST:$PORT;
-    keepalive 32;
+    keepalive          32;
+    keepalive_timeout  60s;
+    keepalive_requests 1000;
 }
 
 server {
@@ -256,7 +322,7 @@ server {
         proxy_pass         http://$APP_NAME;
         proxy_http_version 1.1;
         proxy_set_header   Upgrade           \$http_upgrade;
-        proxy_set_header   Connection        'upgrade';
+        proxy_set_header   Connection        \$${CONN_VAR};
         proxy_set_header   Host              \$host;
         proxy_set_header   X-Real-IP         \$remote_addr;
         proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
