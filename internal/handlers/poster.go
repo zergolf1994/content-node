@@ -15,7 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// HandlePoster handles GET /thumb/{fileSlug}/{n}.jpg
+// HandlePoster handles GET /thumb/{fileSlug}/{n}.jpg and /thumb/{fileSlug}/poster.jpg.
 // Proxies thumbnail from nginx-vod-module via storage
 func (h *Handler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/thumb/")
@@ -42,10 +42,13 @@ func (h *Handler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		sendNotFound(w, r, http.StatusNotFound)
 		return
 	}
-	for _, c := range timePart {
-		if c < '0' || c > '9' {
-			sendNotFound(w, r, http.StatusNotFound)
-			return
+	isDefaultPoster := timePart == "poster"
+	if !isDefaultPoster {
+		for _, c := range timePart {
+			if c < '0' || c > '9' {
+				sendNotFound(w, r, http.StatusNotFound)
+				return
+			}
 		}
 	}
 
@@ -69,6 +72,14 @@ func (h *Handler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 	if file.IsTrashed() || file.IsDeleted() {
 		sendNotFound(w, r, http.StatusNotFound)
 		return
+	}
+
+	if isDefaultPoster {
+		posterSecond := 0
+		if file.Metadata != nil && file.Metadata.Duration != nil && *file.Metadata.Duration > 0 {
+			posterSecond = int(*file.Metadata.Duration / 2)
+		}
+		timePart = fmt.Sprintf("%d", posterSecond)
 	}
 
 	// ─── Step 2: Find video media ────────────────────────────────────────

@@ -14,7 +14,7 @@ HTTP service เสิร์ฟ content ทั้งหมดของ [VdoHide]
 3. **`/{fileSlug}.{ext}`** — proxy stream ไฟล์จาก storage รองรับ Range / seek — file เป็น video → เสิร์ฟ thumbnail แทน, เป็นรูป + มี `?w=&h=&fit=&q=` → resize on-the-fly, `.vtt` = ซับไตเติล ผ่านเส้นนี้เช่นกัน
 
 ### Images
-4. **`/thumb/{slug}/{sec}.jpg`** — poster เฟรมที่วินาทีนั้น (proxy nginx-vod thumb ของ storage)
+4. **`/thumb/{slug}/{sec}.jpg`** — poster เฟรมที่วินาทีนั้น (proxy nginx-vod thumb ของ storage); ใช้ `poster.jpg` เพื่อเลือกเวลากึ่งกลางวิดีโอ หรือวินาที `0` เมื่อไม่มี duration
 5. **`/{slug}/sprite/sprite.vtt`** + **`/{slug}/sprite/{n}.jpg`** — thumbnail track ตอน hover seek bar
    — 404 ของ path รูปตอบเป็น PNG placeholder 200x200 (ไม่ใช่ XML)
 
