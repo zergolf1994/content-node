@@ -1,5 +1,10 @@
 package models
 
+import (
+	"path"
+	"strings"
+)
+
 // ─── Media helpers ───────────────────────────────────────────
 
 // EffectiveFileID returns ClonedFrom if set, otherwise FileID.
@@ -12,6 +17,22 @@ func (m *Media) EffectiveFileID() string {
 		return *m.FileID
 	}
 	return ""
+}
+
+// ObjectPath returns the persisted object key, with a legacy fallback for
+// cloned media created before path became mandatory.
+func (m *Media) ObjectPath() string {
+	if m.Path != nil && strings.TrimSpace(*m.Path) != "" {
+		return strings.TrimLeft(strings.TrimSpace(*m.Path), "/")
+	}
+	fileName := ""
+	if m.FileName != nil {
+		fileName = strings.TrimSpace(*m.FileName)
+	}
+	if m.EffectiveFileID() == "" || fileName == "" {
+		return ""
+	}
+	return path.Join(m.EffectiveFileID(), fileName)
 }
 
 // GetFilePath returns the expected file path on storage.

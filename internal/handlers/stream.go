@@ -113,9 +113,11 @@ func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ─── Step 4: Build source URL & proxy stream ─────────────────────────
-	mediaPath := ""
-	if media.Path != nil {
-		mediaPath = *media.Path
+	mediaPath := media.ObjectPath()
+	if mediaPath == "" {
+		log.Printf("[Stream] Media object path is empty for mediaId=%s", media.ID)
+		sendNotFound(w, r, http.StatusNotFound)
+		return
 	}
 	sourceURL := strings.TrimRight(publicURL, "/") + "/" + strings.TrimLeft(mediaPath, "/")
 	log.Printf("[Stream] Proxying: slug=%s → %s", fileSlug, sourceURL)
