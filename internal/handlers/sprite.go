@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -70,15 +71,14 @@ func (h *Handler) HandleSpriteVTT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storageBaseURL := storage.GetStorageBaseURL()
-	if storageBaseURL == "" {
-		log.Printf("[Sprite] Storage has no host: %s", storage.ID)
+	vttURL, err := spriteSourceURL(&storage, &media, file.Slug, "sprite.vtt")
+	if err != nil {
+		log.Printf("[Sprite] Cannot resolve VTT source for storage %s: %v", storage.ID, err)
 		HandleNotFound(w, r)
 		return
 	}
 
 	// ─── Step 4: Fetch VTT from storage ──────────────────────────────────
-	vttURL := fmt.Sprintf("%s/%s/sprite/sprite.vtt", storageBaseURL, file.Slug)
 	vttContent, err := utils.FetchURLContent(ctx, vttURL)
 	if err != nil {
 		log.Printf("[Sprite] Failed to fetch VTT from %s: %v", vttURL, err)
@@ -157,15 +157,14 @@ func (h *Handler) HandleSpriteImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storageBaseURL := storage.GetStorageBaseURL()
-	if storageBaseURL == "" {
+	sourceURL, err := spriteSourceURL(&storage, &media, file.Slug, filename)
+	if err != nil {
+		log.Printf("[Sprite] Cannot resolve image source for storage %s: %v", storage.ID, err)
 		HandleNotFound(w, r)
 		return
 	}
 
 	// ─── Step 4: Proxy image from storage ────────────────────────────────
-	sourceURL := fmt.Sprintf("%s/%s/sprite/%s", storageBaseURL, file.Slug, filename)
-
 	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {
 		HandleNotFound(w, r)
@@ -196,6 +195,22 @@ func (h *Handler) HandleSpriteImage(w http.ResponseWriter, r *http.Request) {
 
 	buf := make([]byte, 32*1024)
 	io.CopyBuffer(w, resp.Body, buf)
+}
+
+func spriteSourceURL(storage *models.Storage, media *models.Media, fileSlug, filename string) (string, error) {
+	baseURL := storage.GetStorageBaseURL()
+	assetID := fileSlug
+	if storage.Type == enums.StorageTypeS3 {
+		baseURL = storage.GetOriginBaseURL()
+		assetID = media.EffectiveFileID()
+	}
+	if baseURL == "" {
+		return "", fmt.Errorf("storage base URL is empty")
+	}
+	if assetID == "" {
+		return "", fmt.Errorf("sprite asset ID is empty")
+	}
+	return url.JoinPath(baseURL, assetID, "sprite", filename)
 }
 
 func isValidSpriteFilename(filename string) bool {

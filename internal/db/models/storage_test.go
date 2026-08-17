@@ -4,7 +4,8 @@ import "testing"
 
 func TestS3StorageURLs(t *testing.T) {
 	publicURL := "cdn-a.example.com, https://cdn-b.example.com/base/"
-	storage := &Storage{Type: "s3", PublicURL: &publicURL}
+	originURL := "origin.example.com/raw/"
+	storage := &Storage{Type: "s3", PublicURL: &publicURL, OriginURL: &originURL}
 
 	if got, want := storage.GetPlaybackBaseURL(), "https://cdn-a.example.com"; got != want {
 		t.Fatalf("GetPlaybackBaseURL() = %q, want %q", got, want)
@@ -15,6 +16,9 @@ func TestS3StorageURLs(t *testing.T) {
 	}
 	if got, want := storage.GetVODBaseURL(), "https://cdn-a.example.com"; got != want {
 		t.Fatalf("GetVODBaseURL() = %q, want %q", got, want)
+	}
+	if got, want := storage.GetOriginBaseURL(), "https://origin.example.com/raw"; got != want {
+		t.Fatalf("GetOriginBaseURL() = %q, want %q", got, want)
 	}
 }
 
