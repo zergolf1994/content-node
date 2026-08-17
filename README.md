@@ -41,7 +41,7 @@ HTTP service เสิร์ฟ content ทั้งหมดของ [VdoHide]
 | Route | Redis key | เก็บอะไร |
 |---|---|---|
 | `/{slug}/playlist.m3u8` | `playlist_master:{slug}` | response (เล็ก ~0.4KB) |
-| `/{slug}/video.m3u8` | `playlist_video:{slug}` | **เฉพาะ lookup** `{host, publicUrl}` ~100B — body หลาย KB สร้างสดทุกครั้ง (CF cache ปลายทางแล้ว) |
+| `/{slug}/video.m3u8` | `playlist_video_v2:{slug}` | **เฉพาะ lookup** `{playbackBaseUrl, publicDomains}` — body หลาย KB สร้างสดทุกครั้ง (CF cache ปลายทางแล้ว) |
 | `/playlist/{slug}.json` | `playlist_json:{slug}` | response (เล็ก ~0.5KB) |
 | `/advert/{slug}.json` | `advert:{slug}` | response (เล็ก ~0.3KB) |
 
@@ -53,7 +53,7 @@ HTTP service เสิร์ฟ content ทั้งหมดของ [VdoHide]
 ## Requirements
 
 - **MongoDB** (vdohide platform database) — ตั้งผ่าน `DATABASE_URL`
-- storage-node รันอยู่บนเครื่อง storage (ตัวนี้ fetch m3u8/thumb/sprite จาก host ใน `storages.local`)
+- storage-node/nginx-vod รันอยู่หน้า storage; local resolve จาก `storages.local` ส่วน S3 resolve playback ผ่าน `storages.publicUrl`
 
 ---
 
@@ -112,7 +112,7 @@ GitHub Actions build + release อัตโนมัติ: `linux` (amd64), `li
 |---|---|
 | `files` | lookup ด้วย slug (playlist, stream) |
 | `medias` | resolution ของ file + segment playlist + thumbnail |
-| `storages` | host (fetch m3u8/thumb/sprite) + publicUrl (rewrite/proxy) |
+| `storages` | local host หรือ S3 publicUrl สำหรับ fetch m3u8/thumb/sprite และ rewrite segment |
 | `custom_domains` | VAST ราย domain + advert feed + domain/space check (sync → cache) |
 | `workspaces` | plan ของ space (hobby/pro) สำหรับ resolve ad slug (sync → cache) |
 | `ads` | ตัวโฆษณา (video/image/script) ที่ผูกกับ space (sync → cache) |

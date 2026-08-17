@@ -105,10 +105,7 @@ func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	publicURL := ""
-	if storage.PublicURL != nil {
-		publicURL = *storage.PublicURL
-	}
+	publicURL := storage.GetPublicBaseURL()
 	if publicURL == "" {
 		log.Printf("[Stream] Storage %s has no publicUrl", storage.ID)
 		sendNotFound(w, r, http.StatusInternalServerError)

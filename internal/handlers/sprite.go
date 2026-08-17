@@ -70,15 +70,15 @@ func (h *Handler) HandleSpriteVTT(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storageHostPort := storage.GetHostPort()
-	if storageHostPort == "" {
+	storageBaseURL := storage.GetStorageBaseURL()
+	if storageBaseURL == "" {
 		log.Printf("[Sprite] Storage has no host: %s", storage.ID)
 		HandleNotFound(w, r)
 		return
 	}
 
 	// ─── Step 4: Fetch VTT from storage ──────────────────────────────────
-	vttURL := fmt.Sprintf("http://%s/%s/sprite/sprite.vtt", storageHostPort, file.Slug)
+	vttURL := fmt.Sprintf("%s/%s/sprite/sprite.vtt", storageBaseURL, file.Slug)
 	vttContent, err := utils.FetchURLContent(ctx, vttURL)
 	if err != nil {
 		log.Printf("[Sprite] Failed to fetch VTT from %s: %v", vttURL, err)
@@ -157,14 +157,14 @@ func (h *Handler) HandleSpriteImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storageHostPort := storage.GetHostPort()
-	if storageHostPort == "" {
+	storageBaseURL := storage.GetStorageBaseURL()
+	if storageBaseURL == "" {
 		HandleNotFound(w, r)
 		return
 	}
 
 	// ─── Step 4: Proxy image from storage ────────────────────────────────
-	sourceURL := fmt.Sprintf("http://%s/%s/sprite/%s", storageHostPort, file.Slug, filename)
+	sourceURL := fmt.Sprintf("%s/%s/sprite/%s", storageBaseURL, file.Slug, filename)
 
 	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
 	if err != nil {

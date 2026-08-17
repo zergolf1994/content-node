@@ -109,18 +109,19 @@ func (h *Handler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storageHost := storage.GetHost()
-	if storageHost == "" {
-		log.Printf("[Poster] Storage has no host: %s", storage.ID)
+	vodBaseURL := storage.GetVODBaseURL()
+	if vodBaseURL == "" {
+		log.Printf("[Poster] Storage has no VOD URL: %s", storage.ID)
 		sendNotFound(w, r, http.StatusNotFound)
 		return
 	}
 
 	// ─── Step 4: Proxy to VOD server ─────────────────────────────────────
-	vodPort := storage.GetPort() + 1 // VOD port = storage port + 1 (e.g. 8888 → 8889)
-	timeMs := timePart + "000"       // seconds → milliseconds
-	thumbURL := fmt.Sprintf("http://%s:%d/thumb/%s.json/thumb-%s-w500.jpg",
-		storageHost, vodPort, media.Slug, timeMs)
+	timeMs := timePart + "000" // seconds → milliseconds
+	thumbURL := fmt.Sprintf("%s/thumb/%s.json/thumb-%s-w500.jpg", vodBaseURL, media.Slug, timeMs)
+	if storage.Type == enums.StorageTypeS3 {
+		thumbURL = fmt.Sprintf("%s/%s/thumb-%s-w500.jpg", vodBaseURL, media.Slug, timeMs)
+	}
 	log.Printf("[Poster] Fetching poster: %s", thumbURL)
 
 	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodGet, thumbURL, nil)

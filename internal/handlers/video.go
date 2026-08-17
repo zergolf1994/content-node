@@ -30,13 +30,13 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// ─── Step 1+2: Resolve media → storage (ผ่าน Redis lookup cache) ─────
-	// เก็บเฉพาะค่าที่ใช้เข้าถึง (host + publicUrl ~100B) ไม่เก็บ playlist
+	// เก็บเฉพาะ playback URL + public domains ไม่เก็บ playlist
 	// ทั้งก้อน — body ใหญ่และ CF cache ปลายทางอยู่แล้ว
 	type videoLookup struct {
-		Host      string `json:"host"`
-		PublicURL string `json:"publicUrl"`
+		PlaybackBaseURL string   `json:"playbackBaseUrl"`
+		PublicDomains   []string `json:"publicDomains"`
 	}
-	cacheKey := "playlist_video:" + slug
+	cacheKey := "playlist_video_v2:" + slug
 
 	var lk videoLookup
 	if !cache.GetJSON(cacheKey, &lk) {
@@ -64,37 +64,28 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if storage.PublicURL != nil {
-			lk.PublicURL = *storage.PublicURL
-		}
-		lk.Host = storage.GetHost()
+		lk.PlaybackBaseURL = storage.GetPlaybackBaseURL()
+		lk.PublicDomains = storage.GetPublicDomains()
 		cache.SetJSON(cacheKey, &lk)
 	}
 
-	if lk.PublicURL == "" {
+	if len(lk.PublicDomains) == 0 {
 		log.Printf("[Video] Storage has no publicUrl (media=%s)", slug)
 		HandleNotFound(w, r)
 		return
 	}
 
 	// ─── Step 3: Parse publicUrl domains (comma-separated) ──────────────
-	parts := strings.Split(lk.PublicURL, ",")
-	domains := make([]string, 0, len(parts))
-	for _, d := range parts {
-		d = strings.TrimSpace(d)
-		if d != "" {
-			domains = append(domains, d)
-		}
-	}
+	domains := lk.PublicDomains
 
 	// ─── Step 4: Fetch HLS playlist from storage server ─────────────────
-	if lk.Host == "" {
-		log.Printf("[Video] Storage has no host (media=%s)", slug)
+	if lk.PlaybackBaseURL == "" {
+		log.Printf("[Video] Storage has no playback URL (media=%s)", slug)
 		HandleNotFound(w, r)
 		return
 	}
 
-	storageHLSURL := fmt.Sprintf("http://%s/%s/video.m3u8", lk.Host, slug)
+	storageHLSURL := fmt.Sprintf("%s/%s/video.m3u8", lk.PlaybackBaseURL, slug)
 
 	playlistContent, err := utils.FetchURLContent(ctx, storageHLSURL)
 	if err != nil {

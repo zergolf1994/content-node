@@ -2,6 +2,10 @@ package models
 
 import (
 	"fmt"
+	"net"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/zergolf1994/goose"
@@ -99,6 +103,89 @@ func (s *Storage) GetHostPort() string {
 		return fmt.Sprintf("%s:%d", host, port)
 	}
 	return host
+}
+
+// GetPublicBaseURL returns the first configured public URL. Bare hostnames use
+// HTTPS because S3-backed playback normally goes through the public CDN.
+func (s *Storage) GetPublicBaseURL() string {
+	if s.PublicURL == nil {
+		return ""
+	}
+	for _, raw := range strings.Split(*s.PublicURL, ",") {
+		if normalized := normalizeBaseURL(raw, "https"); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
+}
+
+// GetPublicDomains returns host[:port] values used when rewriting HLS segment
+// URLs across one or more configured CDN domains.
+func (s *Storage) GetPublicDomains() []string {
+	if s.PublicURL == nil {
+		return nil
+	}
+	domains := make([]string, 0)
+	for _, raw := range strings.Split(*s.PublicURL, ",") {
+		normalized := normalizeBaseURL(raw, "https")
+		parsed, err := url.Parse(normalized)
+		if err == nil && parsed.Host != "" {
+			domains = append(domains, parsed.Host)
+		}
+	}
+	return domains
+}
+
+// GetPlaybackBaseURL returns the friendly HLS endpoint. Local storage uses its
+// host's public nginx, while S3 storage uses publicUrl.
+func (s *Storage) GetPlaybackBaseURL() string {
+	if s.Type == enums.StorageTypeS3 {
+		return s.GetPublicBaseURL()
+	}
+	return normalizeBaseURL(s.GetHost(), "http")
+}
+
+// GetStorageBaseURL returns the endpoint serving static/sprite assets.
+func (s *Storage) GetStorageBaseURL() string {
+	if s.Type == enums.StorageTypeS3 {
+		return s.GetPublicBaseURL()
+	}
+	return normalizeBaseURL(s.GetHostPort(), "http")
+}
+
+// GetVODBaseURL returns nginx-vod's internal endpoint for local storage and
+// the friendly public endpoint for S3-backed storage.
+func (s *Storage) GetVODBaseURL() string {
+	if s.Type == enums.StorageTypeS3 {
+		return s.GetPublicBaseURL()
+	}
+	if s.GetPort() <= 0 {
+		return ""
+	}
+	base := normalizeBaseURL(s.GetHost(), "http")
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Hostname() == "" {
+		return ""
+	}
+	parsed.Host = net.JoinHostPort(parsed.Hostname(), strconv.Itoa(s.GetPort()+1))
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func normalizeBaseURL(raw, defaultScheme string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = defaultScheme + "://" + raw
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 // HasSSHCredentials checks if storage has valid SSH credentials.

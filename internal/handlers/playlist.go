@@ -126,9 +126,9 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			storageHost := storage.GetHost()
-			if storageHost != "" {
-				masterURL := fmt.Sprintf("http://%s/%s/master.m3u8", storageHost, media.Slug)
+			playbackBaseURL := storage.GetPlaybackBaseURL()
+			if playbackBaseURL != "" {
+				masterURL := fmt.Sprintf("%s/%s/master.m3u8", playbackBaseURL, media.Slug)
 				content, err := utils.FetchURLContent(ctx, masterURL)
 				if err == nil {
 					streamInf = extractStreamInf(content)
