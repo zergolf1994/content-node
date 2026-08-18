@@ -36,7 +36,8 @@ func init() {
 func imageNotFound(w http.ResponseWriter, status int) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Content-Length", strconv.Itoa(len(notFoundImage200)))
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("CDN-Cache-Control", "public, max-age=60")
 	w.WriteHeader(status)
 	w.Write(notFoundImage200)
 }
@@ -59,7 +60,7 @@ func sendNotFound(w http.ResponseWriter, r *http.Request, status int) {
 	if isImagePath(r.URL.Path) {
 		imageNotFound(w, status)
 	} else {
-		HandleNotFound(w, r)
+		HandleCachedError(w, r, status)
 	}
 }
 

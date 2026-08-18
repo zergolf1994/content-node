@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"content-node/internal/utils"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // HandleVideo handles GET /{mediaSlug}/video.m3u8
@@ -46,8 +48,12 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 			"deletedAt": bson.M{"$eq": nil},
 		}).Decode(&media)
 		if err != nil {
-			log.Printf("[Video] Media not found: %s", slug)
-			HandleNotFound(w, r)
+			log.Printf("[Video] Media lookup failed for %s: %v", slug, err)
+			if errors.Is(err, mongo.ErrNoDocuments) {
+				HandleNotFound(w, r)
+			} else {
+				HandleCachedError(w, r, http.StatusInternalServerError)
+			}
 			return
 		}
 
@@ -60,7 +66,7 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 		err = models.StorageModel.Col().FindOne(ctx, bson.M{"_id": storageID}).Decode(&storage)
 		if err != nil {
 			log.Printf("[Video] Storage not found for media=%s (storageId=%s)", slug, storageID)
-			HandleNotFound(w, r)
+			HandleCachedError(w, r, http.StatusBadGateway)
 			return
 		}
 
@@ -71,7 +77,7 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 
 	if len(lk.PublicDomains) == 0 {
 		log.Printf("[Video] Storage has no publicUrl (media=%s)", slug)
-		HandleNotFound(w, r)
+		HandleCachedError(w, r, http.StatusBadGateway)
 		return
 	}
 
@@ -81,7 +87,7 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 	// ─── Step 4: Fetch HLS playlist from storage server ─────────────────
 	if lk.PlaybackBaseURL == "" {
 		log.Printf("[Video] Storage has no playback URL (media=%s)", slug)
-		HandleNotFound(w, r)
+		HandleCachedError(w, r, http.StatusBadGateway)
 		return
 	}
 
@@ -90,7 +96,11 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 	playlistContent, err := utils.FetchURLContent(ctx, storageHLSURL)
 	if err != nil {
 		log.Printf("[Video] Failed to fetch playlist from %s: %v", storageHLSURL, err)
-		HandleNotFound(w, r)
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			HandleCachedError(w, r, http.StatusGatewayTimeout)
+		} else {
+			HandleCachedError(w, r, http.StatusBadGateway)
+		}
 		return
 	}
 
@@ -102,7 +112,7 @@ func (h *Handler) HandleVideo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(responseBody)))
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("CDN-Cache-Control", "max-age=31536000")
+	w.Header().Set("CDN-Cache-Control", "public, max-age=2592000")
 
 	w.Write(responseBody)
 }

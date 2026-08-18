@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"content-node/internal/utils"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 // HandlePlaylist handles GET /{fileSlug}/playlist.m3u8
@@ -34,7 +36,11 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 	err := models.FileModel.Col().FindOne(ctx, bson.M{"slug": slug}).Decode(&file)
 	if err != nil {
 		log.Printf("[Playlist] File not found for slug=%s: %v", slug, err)
-		HandleNotFound(w, r)
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			HandleNotFound(w, r)
+		} else {
+			HandleCachedError(w, r, http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -55,7 +61,7 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 	cursor, err := models.MediaModel.Col().Find(ctx, mediaFilter)
 	if err != nil {
 		log.Printf("[Playlist] Error finding media for fileId=%s: %v", file.ID, err)
-		HandleNotFound(w, r)
+		HandleCachedError(w, r, http.StatusInternalServerError)
 		return
 	}
 	defer cursor.Close(ctx)
@@ -67,6 +73,11 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		medias = append(medias, media)
+	}
+	if err := cursor.Err(); err != nil {
+		log.Printf("[Playlist] Error reading media for fileId=%s: %v", file.ID, err)
+		HandleCachedError(w, r, http.StatusInternalServerError)
+		return
 	}
 
 	if len(medias) == 0 {
@@ -160,7 +171,7 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("CDN-Cache-Control", "max-age=2592000")
+	w.Header().Set("CDN-Cache-Control", "public, max-age=300")
 
 	w.Write([]byte(playlist.String()))
 }

@@ -81,9 +81,11 @@ func SetJSON(key string, v interface{}) {
 
 // entry — response ที่เก็บลง Redis (body เป็น []byte, JSON encode = base64)
 type entry struct {
-	Status      int    `json:"s"`
-	ContentType string `json:"ct"`
-	Body        []byte `json:"b"`
+	Status          int    `json:"s"`
+	ContentType     string `json:"ct"`
+	CacheControl    string `json:"cc,omitempty"`
+	CDNCacheControl string `json:"cdncc,omitempty"`
+	Body            []byte `json:"b"`
 }
 
 const maxCacheBody = 512 * 1024 // เกินนี้ไม่ cache (กันของใหญ่หลงเข้ามา)
@@ -133,6 +135,18 @@ func Serve(w http.ResponseWriter, r *http.Request, key string, next http.Handler
 			if e.ContentType != "" {
 				w.Header().Set("Content-Type", e.ContentType)
 			}
+			if e.CacheControl != "" {
+				w.Header().Set("Cache-Control", e.CacheControl)
+			} else {
+				// Backward compatibility for entries written before cache headers
+				// became part of the Redis response cache schema.
+				w.Header().Set("Cache-Control", "no-store")
+			}
+			if e.CDNCacheControl != "" {
+				w.Header().Set("CDN-Cache-Control", e.CDNCacheControl)
+			} else {
+				w.Header().Set("CDN-Cache-Control", "public, max-age=300")
+			}
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("X-Cache", "HIT")
 			w.Write(e.Body)
@@ -146,9 +160,11 @@ func Serve(w http.ResponseWriter, r *http.Request, key string, next http.Handler
 	// เก็บเฉพาะ 200 ที่ body ไม่ใหญ่เกิน — ตอบ client ไปแล้ว เก็บแบบ fire-and-forget
 	if rec.status == http.StatusOK && len(rec.body) > 0 {
 		e := entry{
-			Status:      rec.status,
-			ContentType: rec.Header().Get("Content-Type"),
-			Body:        rec.body,
+			Status:          rec.status,
+			ContentType:     rec.Header().Get("Content-Type"),
+			CacheControl:    rec.Header().Get("Cache-Control"),
+			CDNCacheControl: rec.Header().Get("CDN-Cache-Control"),
+			Body:            rec.body,
 		}
 		if raw, err := json.Marshal(e); err == nil {
 			sCtx, sCancel := context.WithTimeout(context.Background(), 2*time.Second)
