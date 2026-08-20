@@ -89,6 +89,8 @@ func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
 	case strings.HasSuffix(path, "/audio.m3u8"):
 		// Audio rendition ใช้ route และ nginx-vod track แยกจาก video
 		h.HandleAudio(w, r)
+	case strings.HasSuffix(path, "/subtitle.vtt"):
+		h.HandleSubtitle(w, r)
 	case strings.HasSuffix(path, "/sprite/sprite.vtt"):
 		h.HandleSpriteVTT(w, r)
 	case strings.Contains(path, "/sprite/") && strings.HasSuffix(path, ".jpg"):
