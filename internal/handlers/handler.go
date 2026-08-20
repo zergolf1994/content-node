@@ -84,8 +84,11 @@ func (h *Handler) Home(w http.ResponseWriter, r *http.Request) {
 		cache.Serve(w, r, "playlist_master:"+slug, h.HandlePlaylist)
 	case strings.HasSuffix(path, "/video.m3u8"):
 		// ไม่ cache ทั้ง response (body ใหญ่หลาย KB) — HandleVideo cache
-		// เฉพาะผล lookup (playback URL/domains) ใน key playlist_video_v2:{slug}
+		// เฉพาะผล lookup (playback URL/domains/playlist) ใน key playlist_video_v4:{slug}
 		h.HandleVideo(w, r)
+	case strings.HasSuffix(path, "/audio.m3u8"):
+		// Audio rendition ใช้ route และ nginx-vod track แยกจาก video
+		h.HandleAudio(w, r)
 	case strings.HasSuffix(path, "/sprite/sprite.vtt"):
 		h.HandleSpriteVTT(w, r)
 	case strings.Contains(path, "/sprite/") && strings.HasSuffix(path, ".jpg"):

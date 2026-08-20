@@ -10,23 +10,24 @@ HTTP service เสิร์ฟ content ทั้งหมดของ [VdoHide]
 1. **`/{fileSlug}/playlist.m3u8`** — master playlist
    — lookup `files` ด้วย slug → รวม `medias` (type video, resolution original/1080/720/480/360)
    — ดึง `#EXT-X-STREAM-INF` จริงจาก storage ถ้าดึงไม่ได้ใช้ค่า estimate — มี resolution มาตรฐานแล้วซ่อน `original`
-2. **`/{mediaSlug}/video.m3u8`** — segment playlist: ดึงจาก storage แล้ว rewrite URL segment เป็น `https://{publicUrl}/...` (round-robin หลาย domain)
-3. **`/{fileSlug}.{ext}`** — proxy stream ไฟล์จาก storage รองรับ Range / seek — file เป็น video → เสิร์ฟ thumbnail แทน, เป็นรูป + มี `?w=&h=&fit=&q=` → resize on-the-fly, `.vtt` = ซับไตเติล ผ่านเส้นนี้เช่นกัน
+2. **`/{mediaSlug}/video.m3u8`** — video segment playlist: ดึงจาก storage แล้ว rewrite URL segment เป็น `https://{publicUrl}/...` (round-robin หลาย domain)
+3. **`/{mediaSlug}/audio.m3u8`** — audio-only segment playlist สำหรับ separated media layout
+4. **`/{fileSlug}.{ext}`** — proxy stream ไฟล์จาก storage รองรับ Range / seek — file เป็น video → เสิร์ฟ thumbnail แทน, เป็นรูป + มี `?w=&h=&fit=&q=` → resize on-the-fly, `.vtt` = ซับไตเติล ผ่านเส้นนี้เช่นกัน
 
 ### Images
-4. **`/thumb/{slug}/{sec}.jpg`** — poster เฟรมที่วินาทีนั้น (proxy nginx-vod thumb ของ storage); ใช้ `poster.jpg` เพื่อเลือกเวลากึ่งกลางวิดีโอ หรือวินาที `0` เมื่อไม่มี duration
-5. **`/{slug}/sprite/sprite.vtt`** + **`/{slug}/sprite/{n}.jpg`** — thumbnail track ตอน hover seek bar
+5. **`/thumb/{slug}/{sec}.jpg`** — poster เฟรมที่วินาทีนั้น (proxy nginx-vod thumb ของ storage); ใช้ `poster.jpg` เพื่อเลือกเวลากึ่งกลางวิดีโอ หรือวินาที `0` เมื่อไม่มี duration
+6. **`/{slug}/sprite/sprite.vtt`** + **`/{slug}/sprite/{n}.jpg`** — thumbnail track ตอน hover seek bar
    — 404 ของ path รูปตอบเป็น PNG placeholder 200x200 (ไม่ใช่ XML)
 
 ### Ads
-6. **`/vast/{slug}.xml`** — VAST ของ custom domain (เช็ค enable + status active) / **`/vast/hobby.xml`** — VAST default จาก setting `advert_hobby`
+7. **`/vast/{slug}.xml`** — VAST ของ custom domain (เช็ค enable + status active) / **`/vast/hobby.xml`** — VAST default จาก setting `advert_hobby`
 
 ### Player feeds
-7. **`/playlist/{fileSlug}.json`** — JW Player playlist feed (title / poster / playlist.m3u8 / sprite track) — ย้ายมาจาก player-node
-8. **`/advert/{adSlug}.json`** — unified advert feed (script + image + video) — `hobby` หรือ slug ของ custom domain — ย้ายมาจาก player-node
+8. **`/playlist/{fileSlug}.json`** — JW Player playlist feed (title / poster / playlist.m3u8 / sprite track) — ย้ายมาจาก player-node
+9. **`/advert/{adSlug}.json`** — unified advert feed (script + image + video) — `hobby` หรือ slug ของ custom domain — ย้ายมาจาก player-node
 
 ### Misc
-9. **`/health`** — status + uptime
+10. **`/health`** — status + uptime
 
 ## Sync Scheduler
 
@@ -41,7 +42,8 @@ HTTP service เสิร์ฟ content ทั้งหมดของ [VdoHide]
 | Route | Redis key | เก็บอะไร |
 |---|---|---|
 | `/{slug}/playlist.m3u8` | `playlist_master:{slug}` | response (เล็ก ~0.4KB) |
-| `/{slug}/video.m3u8` | `playlist_video_v2:{slug}` | **เฉพาะ lookup** `{playbackBaseUrl, publicDomains}` — body หลาย KB สร้างสดทุกครั้ง (CF cache ปลายทางแล้ว) |
+| `/{slug}/video.m3u8` | `playlist_video_v4:{slug}` | **เฉพาะ video lookup** `{playbackBaseUrl, publicDomains, playlistName}` — storage ใช้ `index.m3u8` รองรับทั้ง muxed/video-only |
+| `/{slug}/audio.m3u8` | `playlist_audio_v2:{slug}` | **เฉพาะ audio lookup** `{playbackBaseUrl, publicDomains, playlistName}` — body สร้างสดทุกครั้ง |
 | `/playlist/{slug}.json` | `playlist_json:{slug}` | response (เล็ก ~0.5KB) |
 | `/advert/{slug}.json` | `advert:{slug}` | response (เล็ก ~0.3KB) |
 

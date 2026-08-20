@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -86,6 +87,40 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var audioMedias []models.Media
+	if file.Metadata != nil && file.Metadata.MediaLayout != nil && *file.Metadata.MediaLayout == "separated" {
+		audioCursor, audioErr := models.MediaModel.Col().Find(ctx, bson.M{
+			"fileId":    file.ID,
+			"type":      enums.MediaTypeAudio,
+			"deletedAt": bson.M{"$eq": nil},
+		})
+		if audioErr != nil {
+			log.Printf("[Playlist] Error finding audio media for fileId=%s: %v", file.ID, audioErr)
+			HandleCachedError(w, r, http.StatusInternalServerError)
+			return
+		}
+		defer audioCursor.Close(ctx)
+		for audioCursor.Next(ctx) {
+			var media models.Media
+			if err := audioCursor.Decode(&media); err == nil {
+				audioMedias = append(audioMedias, media)
+			}
+		}
+		if err := audioCursor.Err(); err != nil {
+			log.Printf("[Playlist] Error reading audio media for fileId=%s: %v", file.ID, err)
+			HandleCachedError(w, r, http.StatusInternalServerError)
+			return
+		}
+		if file.Metadata.AudioTrackCount != nil && *file.Metadata.AudioTrackCount > 0 && len(audioMedias) == 0 {
+			log.Printf("[Playlist] Separated file is missing %d expected audio track(s): fileId=%s", *file.Metadata.AudioTrackCount, file.ID)
+			HandleCachedError(w, r, http.StatusServiceUnavailable)
+			return
+		}
+		sort.SliceStable(audioMedias, func(i, j int) bool {
+			return audioSourceIndex(audioMedias[i]) < audioSourceIndex(audioMedias[j])
+		})
+	}
+
 	// If standard resolutions exist (1080/720/480/360), hide "original"
 	hasStandard := false
 	for _, m := range medias {
@@ -115,6 +150,7 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 
 	playlist.WriteString("#EXTM3U\n")
 	playlist.WriteString("#EXT-X-VERSION:6\n")
+	writeAudioRenditions(&playlist, host, audioMedias)
 
 	storageCache := make(map[string]models.Storage)
 
@@ -164,6 +200,9 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if len(audioMedias) > 0 {
+			streamInf = attachAudioGroup(streamInf)
+		}
 		playlist.WriteString(streamInf + "\n")
 		playlist.WriteString("//" + host + "/" + media.Slug + "/video.m3u8\n")
 	}
@@ -174,6 +213,85 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("CDN-Cache-Control", "public, max-age=300")
 
 	w.Write([]byte(playlist.String()))
+}
+
+func audioSourceIndex(media models.Media) int {
+	if media.Metadata != nil && media.Metadata.SourceIndex != nil {
+		return *media.Metadata.SourceIndex
+	}
+	return int(^uint(0) >> 1)
+}
+
+func writeAudioRenditions(playlist *strings.Builder, host string, medias []models.Media) {
+	if len(medias) == 0 {
+		return
+	}
+	hasDefault := false
+	for _, media := range medias {
+		if media.Metadata != nil && media.Metadata.IsDefault != nil && *media.Metadata.IsDefault {
+			hasDefault = true
+			break
+		}
+	}
+	usedNames := make(map[string]int)
+	defaultAssigned := false
+	for index, media := range medias {
+		language := "und"
+		name := ""
+		isDefault := !hasDefault && index == 0
+		if media.Metadata != nil {
+			if media.Metadata.Language != nil && strings.TrimSpace(*media.Metadata.Language) != "" {
+				language = strings.TrimSpace(*media.Metadata.Language)
+			}
+			if media.Metadata.Title != nil {
+				name = strings.TrimSpace(*media.Metadata.Title)
+			}
+			if media.Metadata.IsDefault != nil && *media.Metadata.IsDefault && !defaultAssigned {
+				isDefault = true
+			}
+		}
+		if name == "" {
+			name = language
+			if name == "und" {
+				name = fmt.Sprintf("Audio %d", index+1)
+			}
+		}
+		usedNames[name]++
+		if usedNames[name] > 1 {
+			name = fmt.Sprintf("%s %d", name, usedNames[name])
+		}
+		defaultValue := "NO"
+		if isDefault {
+			defaultValue = "YES"
+			defaultAssigned = true
+		}
+		fmt.Fprintf(playlist,
+			"#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"%s\",LANGUAGE=\"%s\",DEFAULT=%s,AUTOSELECT=YES,URI=\"//%s/%s/audio.m3u8\"\n",
+			hlsAttribute(name), hlsAttribute(language), defaultValue, host, media.Slug)
+	}
+}
+
+func hlsAttribute(value string) string {
+	value = strings.ReplaceAll(value, "\\", "")
+	return strings.ReplaceAll(value, "\"", "'")
+}
+
+func attachAudioGroup(streamInf string) string {
+	if strings.Contains(streamInf, `AUDIO="audio"`) {
+		return streamInf
+	}
+	if marker := `CODECS="`; strings.Contains(streamInf, marker) {
+		start := strings.Index(streamInf, marker) + len(marker)
+		if endOffset := strings.Index(streamInf[start:], `"`); endOffset >= 0 {
+			end := start + endOffset
+			if !strings.Contains(streamInf[start:end], "mp4a") {
+				streamInf = streamInf[:end] + ",mp4a.40.2" + streamInf[end:]
+			}
+		}
+	} else {
+		streamInf += `,CODECS="avc1.64001f,mp4a.40.2"`
+	}
+	return streamInf + `,AUDIO="audio"`
 }
 
 func extractStreamInf(content string) string {
