@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,26 +76,39 @@ func (h *Handler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if isDefaultPoster {
-		posterSecond := 0
-		if file.Metadata != nil && file.Metadata.Duration != nil && *file.Metadata.Duration > 0 {
-			posterSecond = int(*file.Metadata.Duration / 2)
-		}
-		timePart = fmt.Sprintf("%d", posterSecond)
-	}
-
 	// ─── Step 2: Find video media ────────────────────────────────────────
-	var media models.Media
-	err = models.MediaModel.Col().FindOne(ctx, bson.M{
+	mediaCursor, err := models.MediaModel.Col().Find(ctx, bson.M{
 		"fileId":    file.ID,
 		"type":      enums.MediaTypeVideo,
 		"deletedAt": nil,
-	}).Decode(&media)
+	})
 	if err != nil {
 		log.Printf("[Poster] Video media not found for fileId=%s: %v", file.ID, err)
 		sendNotFound(w, r, http.StatusNotFound)
 		return
 	}
+	defer mediaCursor.Close(ctx)
+
+	var videoMedias []models.Media
+	for mediaCursor.Next(ctx) {
+		var candidate models.Media
+		if err := mediaCursor.Decode(&candidate); err == nil {
+			videoMedias = append(videoMedias, candidate)
+		}
+	}
+	if err := mediaCursor.Err(); err != nil {
+		log.Printf("[Poster] Error reading video media for fileId=%s: %v", file.ID, err)
+		sendNotFound(w, r, http.StatusNotFound)
+		return
+	}
+
+	media, ok := selectPosterMedia(videoMedias)
+	if !ok {
+		log.Printf("[Poster] Video media not found for fileId=%s", file.ID)
+		sendNotFound(w, r, http.StatusNotFound)
+		return
+	}
+	timePart = strconv.Itoa(resolvePosterSecond(timePart, isDefaultPoster, file, media))
 
 	// ─── Step 3: Find storage ────────────────────────────────────────────
 	storageID := ""
@@ -155,4 +170,61 @@ func (h *Handler) HandlePoster(w http.ResponseWriter, r *http.Request) {
 
 	buf := make([]byte, 32*1024)
 	io.CopyBuffer(w, resp.Body, buf)
+}
+
+// selectPosterMedia chooses the lowest numeric resolution available. Original
+// is used only when no processed numeric resolution exists.
+func selectPosterMedia(medias []models.Media) (models.Media, bool) {
+	var lowest models.Media
+	var original models.Media
+	lowestResolution := int(^uint(0) >> 1)
+	hasLowest := false
+	hasOriginal := false
+
+	for _, media := range medias {
+		if media.Resolution == nil {
+			continue
+		}
+		resolution := strings.TrimSpace(*media.Resolution)
+		if resolution == enums.ResolutionOriginal {
+			original = media
+			hasOriginal = true
+			continue
+		}
+		numeric, err := strconv.Atoi(resolution)
+		if err == nil && numeric > 0 && numeric < lowestResolution {
+			lowest = media
+			lowestResolution = numeric
+			hasLowest = true
+		}
+	}
+
+	if hasLowest {
+		return lowest, true
+	}
+	return original, hasOriginal
+}
+
+func resolvePosterSecond(timePart string, isDefault bool, file models.File, media models.Media) int {
+	duration := 0.0
+	if media.Metadata != nil && media.Metadata.Duration > 0 {
+		duration = media.Metadata.Duration
+	} else if file.Metadata != nil && file.Metadata.Duration != nil && *file.Metadata.Duration > 0 {
+		duration = *file.Metadata.Duration
+	}
+
+	second := 0
+	if isDefault {
+		second = int(duration / 2)
+	} else if parsed, err := strconv.Atoi(timePart); err == nil && parsed > 0 {
+		second = parsed
+	}
+
+	if duration > 0 && float64(second) >= duration {
+		second = int(math.Ceil(duration)) - 1
+		if second < 0 {
+			second = 0
+		}
+	}
+	return second
 }
