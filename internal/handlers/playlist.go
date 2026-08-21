@@ -88,38 +88,40 @@ func (h *Handler) HandlePlaylist(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var audioMedias []models.Media
+	// Media records are the source of truth. Legacy clones may already have
+	// separated audio while File.metadata.mediaLayout is still missing.
+	audioCursor, audioErr := models.MediaModel.Col().Find(ctx, bson.M{
+		"fileId":    file.ID,
+		"type":      enums.MediaTypeAudio,
+		"deletedAt": bson.M{"$eq": nil},
+	})
+	if audioErr != nil {
+		log.Printf("[Playlist] Error finding audio media for fileId=%s: %v", file.ID, audioErr)
+		HandleCachedError(w, r, http.StatusInternalServerError)
+		return
+	}
+	defer audioCursor.Close(ctx)
+	for audioCursor.Next(ctx) {
+		var media models.Media
+		if err := audioCursor.Decode(&media); err == nil {
+			audioMedias = append(audioMedias, media)
+		}
+	}
+	if err := audioCursor.Err(); err != nil {
+		log.Printf("[Playlist] Error reading audio media for fileId=%s: %v", file.ID, err)
+		HandleCachedError(w, r, http.StatusInternalServerError)
+		return
+	}
 	if file.Metadata != nil && file.Metadata.MediaLayout != nil && *file.Metadata.MediaLayout == "separated" {
-		audioCursor, audioErr := models.MediaModel.Col().Find(ctx, bson.M{
-			"fileId":    file.ID,
-			"type":      enums.MediaTypeAudio,
-			"deletedAt": bson.M{"$eq": nil},
-		})
-		if audioErr != nil {
-			log.Printf("[Playlist] Error finding audio media for fileId=%s: %v", file.ID, audioErr)
-			HandleCachedError(w, r, http.StatusInternalServerError)
-			return
-		}
-		defer audioCursor.Close(ctx)
-		for audioCursor.Next(ctx) {
-			var media models.Media
-			if err := audioCursor.Decode(&media); err == nil {
-				audioMedias = append(audioMedias, media)
-			}
-		}
-		if err := audioCursor.Err(); err != nil {
-			log.Printf("[Playlist] Error reading audio media for fileId=%s: %v", file.ID, err)
-			HandleCachedError(w, r, http.StatusInternalServerError)
-			return
-		}
 		if file.Metadata.AudioTrackCount != nil && *file.Metadata.AudioTrackCount > 0 && len(audioMedias) == 0 {
 			log.Printf("[Playlist] Separated file is missing %d expected audio track(s): fileId=%s", *file.Metadata.AudioTrackCount, file.ID)
 			HandleCachedError(w, r, http.StatusServiceUnavailable)
 			return
 		}
-		sort.SliceStable(audioMedias, func(i, j int) bool {
-			return audioSourceIndex(audioMedias[i]) < audioSourceIndex(audioMedias[j])
-		})
 	}
+	sort.SliceStable(audioMedias, func(i, j int) bool {
+		return audioSourceIndex(audioMedias[i]) < audioSourceIndex(audioMedias[j])
+	})
 
 	// If standard resolutions exist (1080/720/480/360), hide "original"
 	hasStandard := false
