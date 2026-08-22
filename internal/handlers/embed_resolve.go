@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -217,18 +218,40 @@ func (h *Handler) resolveEmbed(r *http.Request, slug string) (*EmbedResolveResul
 	staticHost := services.GetDomainStatic()
 
 	posterURL := ""
-	var posterMedia models.Media
-	err = models.MediaModel.Col().FindOne(ctx, bson.M{
-		"fileId":     file.ID,
-		"type":       enums.MediaTypeImage,
-		"resolution": enums.ResolutionPoster,
-		"deletedAt":  bson.M{"$eq": nil},
-	}).Decode(&posterMedia)
-	if err == nil && posterMedia.StorageID != nil && *posterMedia.StorageID != "" {
-		var storage models.Storage
-		if sErr := models.StorageModel.Col().FindOne(ctx, bson.M{"_id": *posterMedia.StorageID}).Decode(&storage); sErr == nil {
-			if storage.PublicURL != nil && *storage.PublicURL != "" {
-				posterURL = strings.TrimRight(*storage.PublicURL, "/") + "/" + posterMedia.Slug + "/poster.jpg"
+	useCustomPoster := file.Metadata != nil && file.Metadata.PosterMode != nil && *file.Metadata.PosterMode == "custom"
+	if useCustomPoster {
+		if file.Metadata != nil && file.Metadata.PosterMediaSlug != nil &&
+			strings.TrimSpace(*file.Metadata.PosterMediaSlug) != "" && staticHost != "" {
+			posterURL = reqProto + "://" + staticHost + "/" +
+				url.PathEscape(strings.TrimSpace(*file.Metadata.PosterMediaSlug)) + normalizeStoredPosterExtension(file.Metadata.PosterMediaExt)
+		} else {
+			// Legacy files created before posterMediaSlug/posterMediaExt were stored.
+			posterFilter := bson.M{
+				"fileId":     file.ID,
+				"type":       enums.MediaTypeImage,
+				"resolution": enums.ResolutionPoster,
+				"deletedAt":  bson.M{"$eq": nil},
+			}
+			if file.Metadata != nil && file.Metadata.PosterMediaID != nil && *file.Metadata.PosterMediaID != "" {
+				posterFilter["_id"] = *file.Metadata.PosterMediaID
+			}
+
+			var posterMedia models.Media
+			err = models.MediaModel.Col().FindOne(ctx, posterFilter).Decode(&posterMedia)
+			if err == nil {
+				extension := imageMediaExtension(posterMedia)
+				if staticHost != "" {
+					posterURL = reqProto + "://" + staticHost + "/" + posterMedia.Slug + "." + extension
+				} else if posterMedia.StorageID != nil && *posterMedia.StorageID != "" {
+					var storage models.Storage
+					if sErr := models.StorageModel.Col().FindOne(ctx, bson.M{"_id": *posterMedia.StorageID}).Decode(&storage); sErr == nil {
+						if publicURL := storage.GetPublicBaseURL(); publicURL != "" {
+							if objectPath := posterMedia.ObjectPath(); objectPath != "" {
+								posterURL = strings.TrimRight(publicURL, "/") + "/" + strings.TrimLeft(objectPath, "/")
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -237,8 +260,12 @@ func (h *Handler) resolveEmbed(r *http.Request, slug string) (*EmbedResolveResul
 
 	if posterURL == "" {
 		thumbTime := 0
-		if file.Metadata != nil && file.Metadata.Duration != nil {
-			thumbTime = int(*file.Metadata.Duration / 2)
+		if file.Metadata != nil {
+			if file.Metadata.PosterSecond != nil && *file.Metadata.PosterSecond >= 0 {
+				thumbTime = *file.Metadata.PosterSecond
+			} else if file.Metadata.Duration != nil {
+				thumbTime = int(*file.Metadata.Duration / 2)
+			}
 		}
 		if staticHost != "" {
 			posterURL = reqProto + "://" + staticHost + "/thumb/" + slug + "/" + fmt.Sprintf("%d", thumbTime) + ".jpg"
@@ -329,4 +356,42 @@ func (h *Handler) resolveEmbed(r *http.Request, slug string) (*EmbedResolveResul
 			SpriteVttURL: spriteVttURL,
 		},
 	}, nil
+}
+
+func imageMediaExtension(media models.Media) string {
+	if media.FileName != nil {
+		name := strings.ToLower(strings.TrimSpace(*media.FileName))
+		if dot := strings.LastIndex(name, "."); dot >= 0 && dot < len(name)-1 {
+			extension := name[dot+1:]
+			switch extension {
+			case "jpg", "jpeg", "png", "webp":
+				return extension
+			}
+		}
+	}
+	if media.MimeType != nil {
+		switch strings.ToLower(strings.TrimSpace(*media.MimeType)) {
+		case "image/png":
+			return "png"
+		case "image/jpeg", "image/jpg":
+			return "jpg"
+		}
+	}
+	return "webp"
+}
+
+func normalizeStoredPosterExtension(extension *string) string {
+	if extension == nil {
+		return ".webp"
+	}
+	value := strings.ToLower(strings.TrimSpace(*extension))
+	if !strings.HasPrefix(value, ".") {
+		value = "." + value
+	}
+	switch value {
+	case ".jpg", ".jpeg", ".png", ".webp":
+		return value
+	default:
+		return ".webp"
+	}
 }

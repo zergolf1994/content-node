@@ -215,7 +215,11 @@ func resolvePosterSecond(timePart string, isDefault bool, file models.File, medi
 
 	second := 0
 	if isDefault {
-		second = int(duration / 2)
+		if file.Metadata != nil && file.Metadata.PosterSecond != nil && *file.Metadata.PosterSecond >= 0 {
+			second = *file.Metadata.PosterSecond
+		} else {
+			second = int(duration / 2)
+		}
 	} else if parsed, err := strconv.Atoi(timePart); err == nil && parsed > 0 {
 		second = parsed
 	}

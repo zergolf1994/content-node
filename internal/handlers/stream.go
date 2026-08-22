@@ -15,8 +15,9 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 )
 
-// StreamFile handles GET /{fileSlug}.{ext}
-// Flow: slug → file._id → media (by fileId == file._id) → storage → proxy stream
+// StreamFile handles GET /{fileSlug}.{ext} and /{mediaSlug}.{ext}.
+// File flow: file.slug → file._id → media by fileId → storage → object.
+// Direct image flow: media.slug → image media → storage → object.
 func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -51,35 +52,44 @@ func (h *Handler) StreamFile(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// ─── Step 1: Find file by slug ───────────────────────────────────────
+	var media models.Media
 	var file models.File
 	err := models.FileModel.Col().FindOne(ctx, bson.M{"slug": fileSlug}).Decode(&file)
-	if err != nil {
-		log.Printf("[Stream] File not found for slug=%s: %v", fileSlug, err)
-		sendNotFound(w, r, http.StatusNotFound)
-		return
-	}
+	if err == nil {
+		if file.IsTrashed() || file.IsDeleted() {
+			sendNotFound(w, r, http.StatusGone)
+			return
+		}
 
-	if file.IsTrashed() || file.IsDeleted() {
-		sendNotFound(w, r, http.StatusGone)
-		return
-	}
+		// ─── Step 2a: Find media by fileId == file._id ───────────────────
+		mediaFilter := bson.M{
+			"fileId":    file.ID,
+			"deletedAt": nil,
+		}
+		// If file is a video → find generated thumbnail instead.
+		if file.Type == enums.FileTypeVideo {
+			mediaFilter["type"] = enums.MediaTypeThumbnail
+		}
 
-	// ─── Step 2: Find media by fileId == file._id ────────────────────────
-	mediaFilter := bson.M{
-		"fileId":    file.ID,
-		"deletedAt": nil,
-	}
-	// If file is a video → find thumbnail image instead
-	if file.Type == enums.FileTypeVideo {
-		mediaFilter["type"] = enums.MediaTypeThumbnail
-	}
-
-	var media models.Media
-	err = models.MediaModel.Col().FindOne(ctx, mediaFilter).Decode(&media)
-	if err != nil {
-		log.Printf("[Stream] Media not found for fileId=%s: %v", file.ID, err)
-		sendNotFound(w, r, http.StatusNotFound)
-		return
+		err = models.MediaModel.Col().FindOne(ctx, mediaFilter).Decode(&media)
+		if err != nil {
+			log.Printf("[Stream] Media not found for fileId=%s: %v", file.ID, err)
+			sendNotFound(w, r, http.StatusNotFound)
+			return
+		}
+	} else {
+		// ─── Step 2b: Custom images are addressed by media.slug ─────────
+		err = models.MediaModel.Col().FindOne(ctx, bson.M{
+			"slug":      fileSlug,
+			"type":      enums.MediaTypeImage,
+			"deletedAt": nil,
+		}).Decode(&media)
+		if err != nil {
+			log.Printf("[Stream] File or image media not found for slug=%s: %v", fileSlug, err)
+			sendNotFound(w, r, http.StatusNotFound)
+			return
+		}
+		log.Printf("[Stream] Resolved direct image media slug=%s mediaId=%s", fileSlug, media.ID)
 	}
 
 	// ─── Step 3: Find storage by storageId ───────────────────────────────

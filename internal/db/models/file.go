@@ -25,6 +25,11 @@ type FileMetadata struct {
 	MediaLayout        *string     `bson:"mediaLayout,omitempty" json:"mediaLayout,omitempty"`
 	AudioTrackCount    *int        `bson:"audioTrackCount,omitempty" json:"audioTrackCount,omitempty"`
 	SubtitleTrackCount *int        `bson:"subtitleTrackCount,omitempty" json:"subtitleTrackCount,omitempty"`
+	PosterSecond       *int        `bson:"posterSecond,omitempty" json:"posterSecond,omitempty"`
+	PosterMode         *string     `bson:"posterMode,omitempty" json:"posterMode,omitempty"`
+	PosterMediaID      *string     `bson:"posterMediaId,omitempty" json:"posterMediaId,omitempty"`
+	PosterMediaSlug    *string     `bson:"posterMediaSlug,omitempty" json:"posterMediaSlug,omitempty"`
+	PosterMediaExt     *string     `bson:"posterMediaExt,omitempty" json:"posterMediaExt,omitempty"`
 }
 
 // File represents a file/folder/space record.
