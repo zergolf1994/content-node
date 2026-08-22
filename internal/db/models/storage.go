@@ -129,6 +129,31 @@ func (s *Storage) GetOriginBaseURL() string {
 	return normalizeBaseURL(*s.OriginURL, "https")
 }
 
+// GetS3ObjectBaseURL returns the HTTP base used to read non-video S3 objects.
+// Prefer the storage's public object URL. Raw video/sprite paths use
+// GetOriginBaseURL directly; this helper retains origin and endpoint fallbacks
+// for storage without a public object URL.
+func (s *Storage) GetS3ObjectBaseURL() string {
+	if public := s.GetPublicBaseURL(); public != "" {
+		return public
+	}
+	if origin := s.GetOriginBaseURL(); origin != "" {
+		return origin
+	}
+	if s.S3 == nil || s.S3.Endpoint == nil || strings.TrimSpace(s.S3.Bucket) == "" {
+		return ""
+	}
+	endpoint := normalizeBaseURL(*s.S3.Endpoint, "https")
+	if endpoint == "" {
+		return ""
+	}
+	base, err := url.JoinPath(endpoint, strings.TrimSpace(s.S3.Bucket))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimRight(base, "/")
+}
+
 // GetPublicDomains returns host[:port] values used when rewriting HLS segment
 // URLs across one or more configured CDN domains.
 func (s *Storage) GetPublicDomains() []string {

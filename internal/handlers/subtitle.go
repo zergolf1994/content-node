@@ -123,7 +123,7 @@ func subtitleSourceURL(media models.Media, storage models.Storage, file models.F
 	}
 
 	if storage.Type == enums.StorageTypeS3 {
-		base := storage.GetOriginBaseURL()
+		base := storage.GetS3ObjectBaseURL()
 		objectPath := ""
 		if media.Path != nil {
 			objectPath = strings.Trim(*media.Path, "/")
